@@ -33,7 +33,10 @@ if command -v mc >/dev/null 2>&1 && [ -n "$MINIO_ENDPOINT" ]; then
             mc stat "shaarli-backup/$BACKUP_BUCKET/$name" >/dev/null 2>&1 && {
                 echo "Restoring $name from backup..."
                 mkdir -p "$DATA_DIR"
-                mc cp "shaarli-backup/$BACKUP_BUCKET/$name" "$DATA_DIR/$name" >/dev/null 2>&1 && echo "Restore complete" && break
+                mc cp "shaarli-backup/$BACKUP_BUCKET/$name" "$DATA_DIR/$name" >/dev/null 2>&1
+                chown nginx:nginx "$DATA_DIR/$name" 2>/dev/null
+                echo "Restore complete"
+                break
             } 2>/dev/null
         done
     fi
