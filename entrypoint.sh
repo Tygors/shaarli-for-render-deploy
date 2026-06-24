@@ -11,12 +11,10 @@ TRIGGER_FILE="/tmp/shaarli-backup-trigger"
 BACKED=""
 
 do_backup() {
-    # Find and backup datastore.php (preferred) or datastore.sqlite
-    for name in datastore.php datastore.sqlite; do
+    for name in config.json.php datastore.php datastore.sqlite; do
         if [ -f "$DATA_DIR/$name" ]; then
             mc cp "$DATA_DIR/$name" "shaarli-backup/$BACKUP_BUCKET/$name" >/dev/null 2>&1 && \
             BACKED="yes" && echo "Backed up $name ($(wc -c < "$DATA_DIR/$name")b)" || echo "WARNING: backup failed" >&2
-            return 0
         fi
     done
 }
@@ -27,16 +25,15 @@ if command -v mc >/dev/null 2>&1 && [ -n "$MINIO_ENDPOINT" ]; then
         echo "MinIO backup alias configured for bucket: $BACKUP_BUCKET" || \
         echo "WARNING: Failed to configure MinIO backup alias" >&2
 
-    # Restore from MinIO if no local database
+    # Restore from MinIO if no local data files
     if ! ls "$DATA_DIR/datastore."* 2>/dev/null | head -1 | grep -q .; then
-        for name in datastore.php datastore.sqlite; do
+        for name in config.json.php datastore.php datastore.sqlite; do
             mc stat "shaarli-backup/$BACKUP_BUCKET/$name" >/dev/null 2>&1 && {
                 echo "Restoring $name from backup..."
                 mkdir -p "$DATA_DIR"
                 mc cp "shaarli-backup/$BACKUP_BUCKET/$name" "$DATA_DIR/$name" >/dev/null 2>&1
                 chown nginx:nginx "$DATA_DIR/$name" 2>/dev/null
-                echo "Restore complete"
-                break
+                echo "Restore complete ($name)"
             } 2>/dev/null
         done
     fi
