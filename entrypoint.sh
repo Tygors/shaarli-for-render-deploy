@@ -16,7 +16,7 @@ do_backup() {
     fi
     echo "==== Shaarli Data Dir: $(ls -la $DATA_DIR/ 2>/dev/null | tr '\n' ' ')"
     echo "==== Searching shaarli data files..."
-    find /var/www -name "*.sqlite" -o -name "datastore.php" 2>/dev/null | head -10
+    find /tmp /var /home /etc /root -maxdepth 4 \( -name "*.sqlite" -o -name "datastore*" -o -name "shaarli*" \) 2>/dev/null | head -20
     # Find the database file (sqlite or flat file)
     DB_FILE=""
     for f in datastore.sqlite datastore.php; do
