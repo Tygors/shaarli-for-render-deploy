@@ -14,14 +14,16 @@ do_backup() {
         echo "DEBUG: DATA_DIR $DATA_DIR not found" >&2
         return 0
     fi
-    echo "DEBUG: Backing up $DATA_DIR/ (dir listing: $(ls $DATA_DIR/ 2>/dev/null | tr '\n' ' '))"
+    echo "==== Shaarli Data Dir: $(ls -la $DATA_DIR/ 2>/dev/null | tr '\n' ' ')"
+    echo "==== Searching shaarli data files..."
+    find /var/www -name "*.sqlite" -o -name "datastore.php" 2>/dev/null | head -10
     # Find the database file (sqlite or flat file)
     DB_FILE=""
     for f in datastore.sqlite datastore.php; do
         [ -f "$DATA_DIR/$f" ] && DB_FILE="$DATA_DIR/$f" && break
     done
     if [ -z "$DB_FILE" ]; then
-        echo "DEBUG: No database file found in $DATA_DIR" >&2
+        echo "DEBUG: No database file found in $DATA_DIR, searching elsewhere..." >&2
         return 0
     fi
     size=$(wc -c < "$DB_FILE")
