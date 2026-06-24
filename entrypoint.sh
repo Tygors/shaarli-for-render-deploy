@@ -55,8 +55,8 @@ if command -v mc >/dev/null 2>&1 && [ -n "$MINIO_ENDPOINT" ]; then
     ) &
 fi
 
-# Run s6 init in background so we can trap shutdown signals
-/init &
+# Run s6 service manager in background so we can trap shutdown signals
+/usr/bin/s6-svscan /etc/services.d &
 S6_PID=$!
 
 # Trap SIGTERM to run final backup before shutdown
