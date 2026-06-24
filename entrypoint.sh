@@ -11,12 +11,12 @@ TRIGGER_FILE="/tmp/shaarli-backup-trigger"
 BACKED=""
 
 do_backup() {
-    for name in config.json.php datastore.php datastore.sqlite; do
-        if [ -f "$DATA_DIR/$name" ]; then
-            mc cp "$DATA_DIR/$name" "shaarli-backup/$BACKUP_BUCKET/$name" >/dev/null 2>&1 && \
-            BACKED="yes" && echo "Backed up $name ($(wc -c < "$DATA_DIR/$name")b)" || echo "WARNING: backup failed" >&2
-        fi
-    done
+    local tmp="/tmp/shaarli-backup.tar.gz"
+    tar czf "$tmp" -C "$DATA_DIR" . 2>/dev/null && \
+    count=$(tar tzf "$tmp" 2>/dev/null | wc -l) && \
+    mc cp "$tmp" "shaarli-backup/$BACKUP_BUCKET/data.tar.gz" >/dev/null 2>&1 && \
+    rm -f "$tmp" && BACKED="yes" && echo "Backed up data/ ($count files)" || \
+    echo "WARNING: backup failed" >&2
 }
 
 # MinIO backup/restore
@@ -27,15 +27,15 @@ if command -v mc >/dev/null 2>&1 && [ -n "$MINIO_ENDPOINT" ]; then
 
     # Restore from MinIO if no local data files
     if ! ls "$DATA_DIR/datastore."* 2>/dev/null | head -1 | grep -q .; then
-        for name in config.json.php datastore.php datastore.sqlite; do
-            mc stat "shaarli-backup/$BACKUP_BUCKET/$name" >/dev/null 2>&1 && {
-                echo "Restoring $name from backup..."
-                mkdir -p "$DATA_DIR"
-                mc cp "shaarli-backup/$BACKUP_BUCKET/$name" "$DATA_DIR/$name" >/dev/null 2>&1
-                chown nginx:nginx "$DATA_DIR/$name" 2>/dev/null
-                echo "Restore complete ($name)"
-            } 2>/dev/null
-        done
+        if mc stat "shaarli-backup/$BACKUP_BUCKET/data.tar.gz" >/dev/null 2>&1; then
+            echo "Restoring data/ from backup..."
+            mkdir -p "$DATA_DIR"
+            mc cp "shaarli-backup/$BACKUP_BUCKET/data.tar.gz" "/tmp/shaarli-restore.tar.gz" >/dev/null 2>&1
+            tar xzf "/tmp/shaarli-restore.tar.gz" -C "$DATA_DIR" 2>/dev/null
+            chown -R nginx:nginx "$DATA_DIR" 2>/dev/null
+            rm -f "/tmp/shaarli-restore.tar.gz"
+            echo "Restore complete"
+        fi
     fi
 
     # 12-minute scheduled backup (catch-all)
