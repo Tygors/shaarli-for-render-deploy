@@ -8,4 +8,7 @@ RUN apk add --no-cache curl sqlite ca-certificates && \
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+COPY patch.php /tmp/patch.php
+RUN php /tmp/patch.php && rm -f /tmp/patch.php
+
 ENTRYPOINT ["/entrypoint.sh"]
