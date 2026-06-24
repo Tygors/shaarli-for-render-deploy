@@ -3,12 +3,14 @@
 $file = '/var/www/shaarli/application/front/controller/admin/ShaarePublishController.php';
 $code = file_get_contents($file);
 
-// Find the save method and add a touch call before the closing brace of the method
-// The method signature is: public function save(Request $request, array $arguments = []): Response
-$target = 'public function save(Request $request, array $arguments = []): Response';
+// Find the save method and add a touch call before the closing brace
+$target = 'public function save(Request $request, Response $response): Response';
 if (strpos($code, $target) === false) {
-    // Try alternative signature
-    $target = 'public function save(Request $request): Response';
+    echo "WARNING: save method not found in ShaarePublishController\n";
+    echo "CHECKING: available methods:\n";
+    preg_match_all('/function (\w+)/', $code, $matches);
+    foreach ($matches[1] as $m) echo "  - $m\n";
+    exit(1);
 }
 if (strpos($code, $target) === false) {
     echo "WARNING: save method not found in ShaarePublishController\n";
