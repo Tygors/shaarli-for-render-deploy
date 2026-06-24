@@ -1,6 +1,6 @@
 <?php
 // Patch Shaarli's PublishController to add backup trigger on bookmark save
-$file = '/var/www/shaarli/application/front/controller/Admin/ShaarePublishController.php';
+$file = '/var/www/shaarli/application/front/controller/admin/ShaarePublishController.php';
 $code = file_get_contents($file);
 
 // Find the save method and add a touch call before the closing brace of the method
