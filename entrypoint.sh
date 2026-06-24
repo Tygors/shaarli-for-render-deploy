@@ -6,17 +6,34 @@ set -e
 # ──────────────────────────────────────────────────
 
 DATA_DIR="/var/www/shaarli/data"
-DB_FILE="$DATA_DIR/datastore.sqlite"
 BACKUP_BUCKET="${MINIO_BACKUP_BUCKET:-shaarli-backup}"
 TRIGGER_FILE="/tmp/shaarli-backup-trigger"
 
 do_backup() {
-    if [ ! -f "$DB_FILE" ]; then
+    if [ ! -d "$DATA_DIR" ]; then
+        echo "DEBUG: DATA_DIR $DATA_DIR not found" >&2
         return 0
     fi
-    sqlite3 "$DB_FILE" ".backup $DATA_DIR/.backup_tmp" && \
-    mc cp "$DATA_DIR/.backup_tmp" "shaarli-backup/$BACKUP_BUCKET/datastore.sqlite" >/dev/null 2>&1 && \
-    rm -f "$DATA_DIR/.backup_tmp"
+    echo "DEBUG: Backing up $DATA_DIR/ (dir listing: $(ls $DATA_DIR/ 2>/dev/null | tr '\n' ' '))"
+    # Find the database file (sqlite or flat file)
+    DB_FILE=""
+    for f in datastore.sqlite datastore.php; do
+        [ -f "$DATA_DIR/$f" ] && DB_FILE="$DATA_DIR/$f" && break
+    done
+    if [ -z "$DB_FILE" ]; then
+        echo "DEBUG: No database file found in $DATA_DIR" >&2
+        return 0
+    fi
+    size=$(wc -c < "$DB_FILE")
+    echo "Backing up $DB_FILE (${size}b)..."
+    if echo "$DB_FILE" | grep -q '\.sqlite$'; then
+        sqlite3 "$DB_FILE" ".backup $DATA_DIR/.backup_tmp" && \
+        mc cp "$DATA_DIR/.backup_tmp" "shaarli-backup/$BACKUP_BUCKET/datastore.sqlite" >/dev/null 2>&1 && \
+        rm -f "$DATA_DIR/.backup_tmp" && echo "Backup OK (${size}b)" || echo "WARNING: backup failed" >&2
+    else
+        # Flat file - copy directly
+        mc cp "$DB_FILE" "shaarli-backup/$BACKUP_BUCKET/datastore.php" >/dev/null 2>&1 && echo "Backup OK (${size}b)" || echo "WARNING: backup failed" >&2
+    fi
 }
 
 # MinIO backup/restore
@@ -27,19 +44,29 @@ if command -v mc >/dev/null 2>&1 && [ -n "$MINIO_ENDPOINT" ]; then
         echo "WARNING: Failed to configure MinIO backup alias" >&2
     fi
 
-    if [ ! -f "$DB_FILE" ]; then
-        if mc stat "shaarli-backup/$BACKUP_BUCKET/datastore.sqlite" >/dev/null 2>&1; then
-            echo "Restoring datastore.sqlite from backup..."
-            mkdir -p "$DATA_DIR"
-            mc cp "shaarli-backup/$BACKUP_BUCKET/datastore.sqlite" "$DB_FILE" >/dev/null 2>&1 && echo "Restore complete" || echo "WARNING: restore failed" >&2
-        fi
+    # Check if any local database file exists; if not, try restore
+    if ! ls "$DATA_DIR/datastore.sqlite" "$DATA_DIR/datastore.php" 2>/dev/null | head -1 | grep -q .; then
+        for remote in datastore.sqlite datastore.php; do
+            if mc stat "shaarli-backup/$BACKUP_BUCKET/$remote" >/dev/null 2>&1; then
+                echo "Restoring $remote from backup..."
+                mkdir -p "$DATA_DIR"
+                mc cp "shaarli-backup/$BACKUP_BUCKET/$remote" "$DATA_DIR/$remote" >/dev/null 2>&1 && echo "Restore complete ($remote)" && break || echo "WARNING: restore failed ($remote)" >&2
+            fi
+        done
     fi
 
-    # Scheduled backup (12 minutes)
+    # Initial backup 30s after startup (catches databases created by Shaarli)
+    (
+        sleep 30
+        echo "DEBUG: Running initial backup..."
+        do_backup && echo "DEBUG: Initial backup done" || echo "WARNING: initial backup failed" >&2
+    ) &
+
+    # Scheduled backup (every 12 minutes)
     (
         while true; do
             sleep "${MINIO_BACKUP_INTERVAL:-720}"
-            do_backup && echo "Backup complete" || echo "WARNING: backup failed" >&2
+            do_backup && echo "Scheduled backup complete" || echo "WARNING: scheduled backup failed" >&2
         done
     ) &
 
@@ -53,6 +80,8 @@ if command -v mc >/dev/null 2>&1 && [ -n "$MINIO_ENDPOINT" ]; then
             fi
         done
     ) &
+
+    echo "Backup system started (initial: 90s, scheduled: ${MINIO_BACKUP_INTERVAL:-720}s, trigger: 60s)"
 fi
 
 # Run s6 service manager in background so we can trap shutdown signals
