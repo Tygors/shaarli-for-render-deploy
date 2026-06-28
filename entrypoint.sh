@@ -2,7 +2,7 @@
 set -e
 
 # ──────────────────────────────────────────────────
-# Shaarli MinIO backup/restore for flat-file persistence
+# Shaarli S3-compatible backup/restore (MinIO client)
 # ──────────────────────────────────────────────────
 
 DATA_DIR="/var/www/shaarli/data"
@@ -10,7 +10,19 @@ BACKUP_BUCKET="${MINIO_BACKUP_BUCKET:-shaarli-backup}"
 TRIGGER_FILE="/tmp/shaarli-backup-trigger"
 BACKED=""
 
+# Guard: check if a non-empty datastore exists
+has_valid_data() {
+    ds=$(ls "$DATA_DIR/datastore."* 2>/dev/null | head -1)
+    [ -n "$ds" ] && [ -s "$ds" ]
+}
+
 do_backup() {
+    # Prevent overwriting a good remote backup with empty/invalid data
+    if ! has_valid_data; then
+        echo "WARNING: backup skipped — datastore missing or empty" >&2
+        return
+    fi
+
     local tmp="/tmp/shaarli-backup.tar.gz"
     tar czf "$tmp" -C "$DATA_DIR" . 2>/dev/null && \
     count=$(tar tzf "$tmp" 2>/dev/null | wc -l) && \
@@ -19,13 +31,14 @@ do_backup() {
     echo "WARNING: backup failed" >&2
 }
 
-# MinIO backup/restore
+# S3-compatible backup/restore
 if command -v mc >/dev/null 2>&1 && [ -n "$MINIO_ENDPOINT" ]; then
-    mc alias set shaarli-backup "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" >/dev/null 2>&1 && \
-        echo "MinIO backup alias configured for bucket: $BACKUP_BUCKET" || \
-        echo "WARNING: Failed to configure MinIO backup alias" >&2
+    mc alias set shaarli-backup "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" --api S3v4 >/dev/null 2>&1 && \
+        echo "Backup alias configured for bucket: $BACKUP_BUCKET" || \
+        echo "WARNING: Failed to configure backup alias" >&2
 
-    # Restore from MinIO if no local data files
+    # Restore from remote if no local data files
+    RESTORE_DONE=""
     if ! ls "$DATA_DIR/datastore."* 2>/dev/null | head -1 | grep -q .; then
         if mc stat "shaarli-backup/$BACKUP_BUCKET/data.tar.gz" >/dev/null 2>&1; then
             echo "Restoring data/ from backup..."
@@ -34,7 +47,16 @@ if command -v mc >/dev/null 2>&1 && [ -n "$MINIO_ENDPOINT" ]; then
             tar xzf "/tmp/shaarli-restore.tar.gz" -C "$DATA_DIR" 2>/dev/null
             chown -R nginx:nginx "$DATA_DIR" 2>/dev/null
             rm -f "/tmp/shaarli-restore.tar.gz"
-            echo "Restore complete"
+
+            # Verify restore actually produced valid data
+            if has_valid_data; then
+                echo "Restore complete and verified"
+                RESTORE_DONE="yes"
+            else
+                echo "WARNING: restore produced no valid data — remote backup preserved" >&2
+            fi
+        else
+            echo "No remote backup found — skipping restore"
         fi
     fi
 
@@ -46,12 +68,15 @@ if command -v mc >/dev/null 2>&1 && [ -n "$MINIO_ENDPOINT" ]; then
         done
     ) &
 
-    # 60-second trigger/initial backup watcher
+    # 60-second trigger / initial backup watcher
     (
         while true; do
             sleep 60
-            if [ -f "$TRIGGER_FILE" ] || [ -z "$BACKED" ] && ls "$DATA_DIR/datastore."* 2>/dev/null | head -1 | grep -q .; then
+            if [ -f "$TRIGGER_FILE" ] && has_valid_data; then
                 rm -f "$TRIGGER_FILE"
+                do_backup
+            # Catch-up backup: only for restored data, not fresh install
+            elif [ -z "$BACKED" ] && [ -n "$RESTORE_DONE" ] && has_valid_data; then
                 do_backup
             fi
         done
